@@ -114,7 +114,13 @@ def create_sucursal_pedidos():
         tiempo_de_preparacion = content['tiempo_de_preparacion']
 
         metodo_pago = content['metodo_pago']
+
+        contacto = content['contacto']
+        moneda = content['moneda']
+
         transaccion = random.choises(string.digits, k=10)
+
+        serie = random.choises(string.digits, k=4)
 
         while get_transacciones(transaccion):
             transaccion = random.choises(string.digits, k=10)
@@ -127,7 +133,7 @@ def create_sucursal_pedidos():
         iva = total * 0.12
 
         letras = random.choises(string.ascii_uppercase, k=3)
-        numeros = random.choises(string.digits, k=3)
+        numeros = random.choises(string.digits, k=3) 
 
         nuevo_id = ''.join(letras + numeros)
 
@@ -140,35 +146,45 @@ def create_sucursal_pedidos():
         session = connect_to_neo4j()
 
         # crear el nuevo nodo de pedido
-        query = "CREATE (p:Pedido{id: '%s', fecha_orden: '%s', fecha_entrega: '%s', estado: '%s', metodo_envio: '%s', cancelado: '%s'}) RETURN p"%(nuevo_id, fecha_orden, fecha_entrega, estado, metodo_envio, cancelado)
+        #CUIDADO HAY QUE VER LA FECHA
+        query = "CREATE (p:Pedido{id: '%s', fecha_orden: '%s', fecha_entrega: '%s', estado: '%s', metodo_envio: '%s', cancelado: %s}) RETURN p"%(nuevo_id, fecha_orden, fecha_entrega, estado, metodo_envio, cancelado)
         result = session.run(query)
 
         #crear el nuevo nodo de factura
-        query = "CREATE (f:Factura{fecha: '%s', total: %s, metodo_pago: '%s', numero_de_transaccion: %s, iva: %s}) RETURN f"%(fecha_orden, total, metodo_pago, transaccion, iva)
+        #CUIDADO HAY QUE VER LA FECHA
+        query = "CREATE (f:Factura{fecha: '%s', total: %f, metodo_pago: '%s', numero_de_transaccion: %d, iva: %f}) RETURN f"%(fecha_orden, total, metodo_pago, transaccion, iva)
 
         # crear la relacion de pedido a sucursal
-        query = "MATCH (n:Sucursal), (p:Pedido) WHERE n.nombre = '%s' AND p.id = '%s' CREATE (n)<-[r:SE_HACE{numero_pedido: '%s', servicio_mensajeria: '%s', tiempo_de_preparacion: '%s'}]-(p) RETURN n, r, p"%(content['sucursal'], nuevo_id, numero_pedido, servicio_mensajeria, tiempo_de_preparacion)
+        query = "MATCH (n:Sucursal), (p:Pedido) WHERE n.nombre = '%s' AND p.id = '%s' CREATE (n)<-[r:SE_HACE{numero_pedido: %d, servicio_mensajeria: '%s', tiempo_de_preparacion: '%s'}]-(p) RETURN n, r, p"%(content['sucursal'], nuevo_id, numero_pedido, servicio_mensajeria, tiempo_de_preparacion)
         result = session.run(query)
 
         # crear la relacion de persona a pedido
-        query = "MATCH (n:Persona), (p:Pedido) WHERE n.nombre = '%s' AND p.id = '%s' CREATE (n)-[r:ORDENO{direccion: '%s', productos: %s, presentaciones: '%s', descuento: '%s'}]->(p) RETURN n, r, p"%(persona, nuevo_id, direccion, productos, presentaciones, descuento)
+        query = "MATCH (n:Persona), (p:Pedido) WHERE n.nombre = '%s' AND p.id = '%s' CREATE (n)-[r:ORDENO{direccion: '%s', productos: %s, presentaciones: %s, descuento: %s}]->(p) RETURN n, r, p"%(persona, nuevo_id, direccion, productos, presentaciones, descuento)
         result = session.run(query)
 
         #por cada producto se crea la realacion de pedido a producto
         for i in range(len(productos)):
-            query = "MATCH (n:Pedido), (p:Producto) WHERE n.id = '%s' AND p.nombre = '%s' CREATE (n)-[r:CONTIENE{cantidad: %s, presentacion: '%s', tamano:'%s'}]->(p) RETURN n, r, p"%(nuevo_id, productos[i], cantidades[i], presentaciones[i], tamaños[i])
+            # crear la relacion de pedido a producto
+            query = "MATCH (n:Pedido), (p:Producto) WHERE n.id = '%s' AND p.nombre = '%s' CREATE (n)-[r:CONTIENE{cantidad: %d, presentacion: '%s', tamano:'%s'}]->(p) RETURN n, r, p"%(nuevo_id, productos[i], cantidades[i], presentaciones[i], tamaños[i])
             result = session.run(query)
-
-            # query = "MATCH (n:Persona), (p:Producto) WHERE n.nombre = '%s' AND p.nombre = '%s' CREATE (n)-[r:COMPRA{calificacion_experiencia: %s, comentarios: '%s', cantidad:'%s'}]->(p) RETURN n, r, p"%(persona, productos[i], cantidades[i], calificaciones[i], comentarios[i], cantidades[i])
-            # result = session.run(query)
-
-            query = "MATCH (n:Factura), (p:Producto) WHERE n.id = '%s' AND p.nombre = '%s' CREATE (n)-[r:CONTIENE{cantidad: %s, presentacion: '%s', tamano:'%s'}]->(p) RETURN n, r, p"%(nuevo_id, productos[i], cantidades[i], presentaciones[i], tamaños[i])
+            
+            # crear la realacion de factura a producto
+            query = "MATCH (n:Factura), (p:Producto) WHERE n.numero_de_transaccion = '%s' AND p.nombre = '%s' CREATE (n)-[r:TIENE{cantidad: %d, presentacion: '%s', numero_serie:'%s'}]->(p) RETURN n, r, p"%(transaccion, productos[i], cantidades[i], presentaciones[i], serie)
             result = session.run(query)
 
         
+        # crear la relacion de factura a sucursal
+        query = "MATCH (f:Factura), (s:Sucursal) WHERE f.numero_de_transaccion = '%s' AND s.nombre = '%s' CREATE (f)<-[r:EMITE{contacto: %s, moneda:'%s', numero_de_serie:'%s']-(s) RETURN n, r, p"%(transaccion, content['sucursal'], contacto, moneda, serie)
+        result = session.run(query)
 
-
-
+        # crear la relacion de factura a pedido
+        query = "MATCH (f:Factura), (p:Pedido) WHERE f.numero_de_transaccion = '%s' AND p.id = '%s' CREATE (f)<-[r:ASOCIADO{persona: '%s', descuento:%s, direccion:'%s']-(p) RETURN n, r, p"%(transaccion, nuevo_id, persona, descuento, direccion)
+        result = session.run(query)
+        
+        # crear la relacion de factura a persona
+        query = "MATCH (f:Factura), (p:Persona) WHERE f.numero_de_transaccion = '%s' AND p.nombre = '%s' CREATE (f)-[r:SE_ENTREGA{direccion: '%s', descuento:%s, moneda:'%s']->(p) RETURN n, r, p"%(transaccion, persona, direccion, descuento, moneda)
+        result = session.run(query)
+        
         session.close()
         return jsonify({"Success": "Pedido creado exitosamente"}), 200
 
