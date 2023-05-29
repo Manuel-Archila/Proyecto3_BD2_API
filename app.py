@@ -2,8 +2,11 @@ from flask import Flask, jsonify, request
 from neo4j import GraphDatabase
 import random
 import string
+from flask_cors import CORS
+
 
 app = Flask(__name__)
+cors = CORS(app)
 
 def connect_to_neo4j():
     driver = GraphDatabase.driver("neo4j+s://fbb1df5b.databases.neo4j.io", auth=("neo4j", "NCJMoRmWFfrQtpkTivqCPLvhu0OiiIhd-9NVUgfUvRA"))
@@ -39,7 +42,6 @@ def get_sucursales():
 def get_sucursal_productos():
     try:
         nombre = request.headers.get('nombre')
-        #nombre = "La Torre"
         session = connect_to_neo4j()
         query = "MATCH (n:Sucursal)-[r:TIENE]->(p:Producto) WHERE n.nombre = '%s' RETURN n, r, p"%(nombre)
         result = session.run(query)
@@ -55,6 +57,45 @@ def get_sucursal_productos():
         return jsonify(nodes), 200
     except:
         return jsonify({"Error: No se pudo ejecutar"}), 500
+    
+@app.route('/api/sucursal_servicios', methods=['GET'])
+def get_sucursal_servicios():
+    try:
+        nombre = request.headers.get('nombre')
+        session = connect_to_neo4j()
+        query = "MATCH (n:Sucursal)-[r:CONTRATA]->(s:Servicio) WHERE n.nombre = '%s' RETURN n, r, s"%(nombre)
+        result = session.run(query)
+
+        nodes = []
+        for record in result:
+            nodes.append({
+                "servicio": dict(record['s']),
+                "relacion": dict(record['r'])
+            })
+
+        session.close()
+        return jsonify(nodes), 200
+    except:
+        return jsonify({"Error: No se pudo ejecutar"}), 500
+    
+@app.route('/api/procto_presentacion', methods=['GET'])
+def get_procto_presentacion():
+    try:
+        nombre = request.headers.get('nombre')
+        session = connect_to_neo4j()
+        query = "MATCH (n:Producto) WHERE n.nombre = '%s' RETURN n.presentaciones"%(nombre)
+        result = session.run(query)
+
+        pres = []
+        for record in result:
+            pres.append({
+                "presentaciones": record['n.presentaciones']
+            })
+
+        session.close()
+        return jsonify(pres), 200
+    except:
+        return jsonify({"Error: No se pudo ejecutar"}), 500
 
 @app.route('/api/personas', methods=['GET'])
 def get_personas():
@@ -65,7 +106,7 @@ def get_personas():
         session.close()
         return jsonify(nodes), 200
     except:
-        return jsonify({"Error: No se pudo ejecutar"}), 500
+        return jsonify({"Message": "No se pudo ejecutar"}), 500
 
 @app.route('/api/sucursal_pedidos', methods=['GET'])
 def get_sucursal_pedidos():
@@ -89,8 +130,12 @@ def get_sucursal_pedidos():
     except:
         return jsonify({"Error: No se pudo ejecutar"}), 500
 
+
+
 @app.route('/api/sucursal_pedidos', methods=['POST'])
 def create_sucursal_pedidos():
+    
+    print(request.json)
     try:
         content = request.json
         persona = content['persona']
@@ -100,12 +145,19 @@ def create_sucursal_pedidos():
         descuento = content['descuento']
         cantidades = content['cantidades']
         tamaños = content['tamaños']
-        calificaciones = content['calificaciones']
-        comentarios = content['comentarios']
+
+        mediocompra = content['mediocompra']
+
+        if mediocompra == 'En linea':
+            tipo = 'Electronico'
+        else:
+            tipo = 'Fisico'
 
         fecha_orden = content['fecha_orden']
         fecha_entrega = content['fecha_entrega']
-        estado = content['estado']
+        # estado = content['estado']
+        estado = 'En proceso'
+
         metodo_envio = content['metodo_envio']
         cancelado = content['cancelado']
 
@@ -118,28 +170,33 @@ def create_sucursal_pedidos():
         contacto = content['contacto']
         moneda = content['moneda']
 
-        transaccion = random.choises(string.digits, k=10)
+        transaccion = ''.join(random.choices(string.digits, k=10))
 
-        serie = random.choises(string.digits, k=4)
+        serie = ''.join(random.choices(string.digits, k=4))
 
         while get_transacciones(transaccion):
-            transaccion = random.choises(string.digits, k=10)
+            transaccion = random.choices(string.digits, k=10)
+        
+        transaccion = ''.join(transaccion)
         
         total = 0
         for i in range(len(productos)):
             precioU = get_precio(productos[i])
             total += cantidades[i] * precioU
 
+        if descuento:   
+            total -= total * 0.2
+            
         iva = total * 0.12
 
-        letras = random.choises(string.ascii_uppercase, k=3)
-        numeros = random.choises(string.digits, k=3) 
+        letras = random.choices(string.ascii_uppercase, k=3)
+        numeros = random.choices(string.digits, k=3) 
 
         nuevo_id = ''.join(letras + numeros)
 
         while get_ids(nuevo_id):
-            letras = random.choises(string.ascii_uppercase, k=3)
-            numeros = random.choises(string.digits, k=3)
+            letras = random.choices(string.ascii_uppercase, k=3)
+            numeros = random.choices(string.digits, k=3)
 
             nuevo_id = ''.join(letras + numeros)
 
@@ -152,14 +209,15 @@ def create_sucursal_pedidos():
 
         #crear el nuevo nodo de factura
         #CUIDADO HAY QUE VER LA FECHA
-        query = "CREATE (f:Factura{fecha: '%s', total: %f, metodo_pago: '%s', numero_de_transaccion: %d, iva: %f}) RETURN f"%(fecha_orden, total, metodo_pago, transaccion, iva)
-
+        query = "CREATE (f:Factura{fecha: '%s', total: %f, metodo_pago: '%s', numero_de_transaccion: %s, iva: %f}) RETURN f"%(fecha_orden, total, metodo_pago, transaccion, iva)
+        result = session.run(query)
+        
         # crear la relacion de pedido a sucursal
         query = "MATCH (n:Sucursal), (p:Pedido) WHERE n.nombre = '%s' AND p.id = '%s' CREATE (n)<-[r:SE_HACE{numero_pedido: %d, servicio_mensajeria: '%s', tiempo_de_preparacion: '%s'}]-(p) RETURN n, r, p"%(content['sucursal'], nuevo_id, numero_pedido, servicio_mensajeria, tiempo_de_preparacion)
         result = session.run(query)
 
         # crear la relacion de persona a pedido
-        query = "MATCH (n:Persona), (p:Pedido) WHERE n.nombre = '%s' AND p.id = '%s' CREATE (n)-[r:ORDENO{direccion: '%s', productos: %s, presentaciones: %s, descuento: %s}]->(p) RETURN n, r, p"%(persona, nuevo_id, direccion, productos, presentaciones, descuento)
+        query = "MATCH (n:Persona), (p:Pedido) WHERE n.nombre = '%s' AND p.id = '%s' CREATE (n)-[r:ORDENO{direccion: '%s', medio_compra: '%s', descuento: %s}]->(p) RETURN n, r, p"%(persona, nuevo_id, direccion, mediocompra, descuento)
         result = session.run(query)
 
         #por cada producto se crea la realacion de pedido a producto
@@ -167,29 +225,26 @@ def create_sucursal_pedidos():
             # crear la relacion de pedido a producto
             query = "MATCH (n:Pedido), (p:Producto) WHERE n.id = '%s' AND p.nombre = '%s' CREATE (n)-[r:CONTIENE{cantidad: %d, presentacion: '%s', tamano:'%s'}]->(p) RETURN n, r, p"%(nuevo_id, productos[i], cantidades[i], presentaciones[i], tamaños[i])
             result = session.run(query)
-            
-            # crear la realacion de factura a producto
-            query = "MATCH (n:Factura), (p:Producto) WHERE n.numero_de_transaccion = '%s' AND p.nombre = '%s' CREATE (n)-[r:TIENE{cantidad: %d, presentacion: '%s', numero_serie:'%s'}]->(p) RETURN n, r, p"%(transaccion, productos[i], cantidades[i], presentaciones[i], serie)
-            result = session.run(query)
-
         
         # crear la relacion de factura a sucursal
-        query = "MATCH (f:Factura), (s:Sucursal) WHERE f.numero_de_transaccion = '%s' AND s.nombre = '%s' CREATE (f)<-[r:EMITE{contacto: %s, moneda:'%s', numero_de_serie:'%s']-(s) RETURN n, r, p"%(transaccion, content['sucursal'], contacto, moneda, serie)
+        query = "MATCH (f:Factura), (s:Sucursal) WHERE f.numero_de_transaccion = %s AND s.nombre = '%s' CREATE (f)<-[r:EMITE{contacto: '%s', moneda:'%s', numero_de_serie:'%s'}]-(s) RETURN f, r, s"%(transaccion, content['sucursal'], contacto, moneda, serie)
         result = session.run(query)
 
         # crear la relacion de factura a pedido
-        query = "MATCH (f:Factura), (p:Pedido) WHERE f.numero_de_transaccion = '%s' AND p.id = '%s' CREATE (f)<-[r:ASOCIADO{persona: '%s', descuento:%s, direccion:'%s']-(p) RETURN n, r, p"%(transaccion, nuevo_id, persona, descuento, direccion)
+        query = "MATCH (f:Factura), (p:Pedido) WHERE f.numero_de_transaccion = %s AND p.id = '%s' CREATE (f)<-[r:ASOCIADO{persona: '%s', descuento:%s, direccion:'%s'}]-(p) RETURN f, r, p"%(transaccion, nuevo_id, persona, descuento, direccion)
         result = session.run(query)
         
         # crear la relacion de factura a persona
-        query = "MATCH (f:Factura), (p:Persona) WHERE f.numero_de_transaccion = '%s' AND p.nombre = '%s' CREATE (f)-[r:SE_ENTREGA{direccion: '%s', descuento:%s, moneda:'%s']->(p) RETURN n, r, p"%(transaccion, persona, direccion, descuento, moneda)
+        query = "MATCH (f:Factura), (p:Persona) WHERE f.numero_de_transaccion = %s AND p.nombre = '%s' CREATE (f)-[r:SE_ENTREGA{direccion: '%s', tipo: '%s', moneda:'%s'}]->(p) RETURN f, r, p"%(transaccion, persona, direccion, tipo, moneda)
         result = session.run(query)
         
         session.close()
-        return jsonify({"Success": "Pedido creado exitosamente"}), 200
+        return jsonify({"Message": "Pedido creado exitosamente"}), 200
 
-    except:
-        return jsonify({"Error: No se pudo ejecutar"}), 500
+    except Exception as e:
+        print("El error es este")
+        print(e)
+        return jsonify({"Message": "Error, no se pudo ejecutar"}), 500
 
 def get_ids(nuevo_id):
     try:
@@ -229,7 +284,9 @@ def get_num_pedido(sucursal):
         query = "MATCH (n:Sucursal)<-[r:SE_HACE]-(p:Pedido) WHERE n.nombre = '%s' RETURN n, r, p"%(sucursal)
         result = session.run(query)
 
-        cantidad_pedidos = len(result)
+        cantidad_pedidos = 0
+        for record in result:
+            cantidad_pedidos += 1
 
         session.close()
         return cantidad_pedidos + 1
