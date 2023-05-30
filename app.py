@@ -2,6 +2,8 @@ from flask import Flask, jsonify, request
 from neo4j import GraphDatabase
 import random
 import string
+import datetime
+import random
 from flask_cors import CORS
 
 
@@ -78,6 +80,24 @@ def get_sucursal_servicios():
     except:
         return jsonify({"Error: No se pudo ejecutar"}), 500
     
+@app.route('/api/trabajador_set_activo', methods=['POST'])
+def get_trabajador_set_activo():
+    try:
+        content = request.json
+        print(content)
+        nombre = content['nombre']
+        activo = content['activo']
+
+        session = connect_to_neo4j()
+        query = "MATCH (n:Persona:Trabajador)-[r:TRABAJA]->(s:Sucursal) WHERE n.nombre = '%s' SET r.activo = %s RETURN n"%(nombre, activo)
+        result = session.run(query)
+
+        session.close()
+        return jsonify({"Message": "Trabajador actualizado exitosamente"}), 200
+        
+    except:
+        return jsonify({"Error: No se pudo ejecutar"}), 500
+    
 @app.route('/api/procto_presentacion', methods=['GET'])
 def get_procto_presentacion():
     try:
@@ -107,6 +127,42 @@ def get_personas():
         return jsonify(nodes), 200
     except:
         return jsonify({"Message": "No se pudo ejecutar"}), 500
+    
+@app.route('/api/notrabajadores', methods=['GET'])
+def get_notrabajadores():
+    try:
+        session = connect_to_neo4j()
+        result = session.run("MATCH (n:Persona) WHERE NOT 'Trabajador' IN LABELS(n) RETURN n")
+        nodes = [dict(record['n']) for record in result]
+        session.close()
+        return jsonify(nodes), 200
+    except:
+        return jsonify({"Message": "No se pudo ejecutar"}), 500
+
+@app.route('/api/trabajador_sucursal', methods=['GET'])
+def get_trabajador_sucursal():
+    try:
+        nombre = request.headers.get('nombre')
+        session = connect_to_neo4j()
+        query = "MATCH (n:Sucursal)<-[r:TRABAJA]-(p:Persona:Trabajador) WHERE n.nombre = '%s' RETURN n, r, p"%(nombre)
+        result = session.run(query)
+
+        nodes = []
+        for record in result:
+            diccionario_relacion = dict(record['r'])
+            try:
+                diccionario_relacion['fecha_inicio'] = diccionario_relacion['fecha_inicio'].iso_format()
+            except:
+                pass
+            nodes.append({
+                "trabajador": dict(record['p']),
+                "relacion": diccionario_relacion
+            })
+
+        session.close()
+        return jsonify(nodes), 200
+    except:
+        return jsonify({"Error: No se pudo ejecutar"}), 500
 
 @app.route('/api/sucursal_pedidos', methods=['GET'])
 def get_sucursal_pedidos():
@@ -115,13 +171,58 @@ def get_sucursal_pedidos():
 
         session = connect_to_neo4j()
         query = "MATCH (n:Sucursal)<-[r:SE_HACE]-(p:Pedido) WHERE n.nombre = '%s' RETURN n, r, p"%(nombre)
-        result = session.run(query)
+        result1 = session.run(query)
 
         nodes = []
-        for record in result:
+        for record in result1:
+
+            query = "MATCH (n:Pedido)-[r:CONTIENE]->(p:Producto) WHERE n.id = '%s' RETURN n, r, p"%(dict(record['p'])['id'])
+            result2 = session.run(query)
+
+            productos = []
+            for record2 in result2:
+                productos.append({
+                    "producto": dict(record2['p']),
+                    "relacion": dict(record2['r'])
+                })
+
+            
+            
+            query = "MATCH (n:Pedido)<-[r:ORDENO]-(p:Persona) WHERE n.id = '%s' RETURN n, r, p"%(dict(record['p'])['id'])
+            result3 = session.run(query)
+
+            persona = ''
+            for record3 in result3:
+                persona = dict(record3['p'])
+
+            query = "MATCH (n:Pedido)-[r:ASOCIADO]->(p:Factura) WHERE n.id = '%s' RETURN n, r, p"%(dict(record['p'])['id'])
+            result4 = session.run(query)
+
+            factura = ''
+            for record4 in result4:
+                factura = dict(record4['p'])
+            
+            try:
+                factura['fecha'] = factura['fecha'].iso_format()
+            except:
+                pass
+
+
+            diccionario_pedido = dict(record['p'])
+
+            try:
+                diccionario_pedido['fecha_orden'] = diccionario_pedido['fecha_orden'].iso_format()
+                diccionario_pedido['fecha_entrega'] = diccionario_pedido['fecha_entrega'].iso_format()
+            except:
+                pass
+            
+
             nodes.append({
-                "pedido": dict(record['p']),
-                "relacion": dict(record['r'])
+                "pedido": diccionario_pedido,
+                "relacion": dict(record['r']),
+                "productos": productos,
+                "persona": persona,
+                "factura": factura
             })
 
         session.close()
@@ -130,7 +231,77 @@ def get_sucursal_pedidos():
     except:
         return jsonify({"Error: No se pudo ejecutar"}), 500
 
+def serialize_datetime(obj):
 
+    if isinstance(obj, datetime):
+        return obj.strftime('%Y-%m-%d %H:%M:%S')  # Formato de fecha y hora deseado
+    raise TypeError('Tipo de objeto no serializable')
+
+@app.route('/api/sucursal_trabajador', methods=['POST'])
+def create_sucursal_trabajador():
+    try:
+        content = request.json
+        print(content)
+        persona = content['persona']
+        horario = content['horario']
+        vehiculo = content['vehiculo']
+        sueldo = float(content['sueldo'])
+        puesto = content['puesto']
+        area = content['area']
+        fecha_inicio = content['fecha_inicio']
+        contrato = content['contrato']
+        activo = content['activo']
+        sucursal = content['sucursal']
+        
+        
+        session = connect_to_neo4j()
+
+        
+        query = "MATCH (p:Persona) WHERE p.nombre = '%s' SET p:Trabajador RETURN p"%(persona)
+        result = session.run(query)
+
+        query = "MATCH (p:Persona:Trabajador) WHERE p.nombre = '%s' SET p.horario = '%s', p.vehiculo = %s, p.sueldo = %f, p.puesto = '%s', p.area = '%s' RETURN p"%(persona, horario, vehiculo, sueldo, puesto, area)
+        result = session.run(query)
+
+        query = "MATCH (p:Persona:Trabajador), (s:Sucursal) WHERE p.nombre = '%s' AND s.nombre = '%s' CREATE (p)-[r:TRABAJA {contrato: %s, activo: %s, fecha_inicio: date('%s')}]->(s) RETURN p, r, s" % (persona, sucursal, contrato, activo, fecha_inicio)
+        result = session.run(query)
+
+        session.close()
+        return jsonify({"Message": "Trabajador creado exitosamente"}), 200
+
+    except Exception as e:
+        print("El error es este")
+        print(e)
+        return jsonify({"Message": "Error, no se pudo ejecutar"}), 500
+
+@app.route('/api/eliminar_trabajador', methods=['POST'])
+def delete_trabajador():
+    try:
+        content = request.json
+        print(content)
+        persona = content['persona']
+        sucursal = content['sucursal']
+
+
+        session = connect_to_neo4j()
+
+        query = "MATCH (p:Persona:Trabajador)-[r:TRABAJA]->(s:Sucursal) WHERE p.nombre = '%s' AND s.nombre = '%s' DELETE r RETURN p, r, s" % (persona, sucursal)
+        result = session.run(query)
+
+
+        # Eliminar horario, vehiculo, sueldo, puesto, area
+        query = "MATCH (p:Persona:Trabajador) WHERE p.nombre = '%s' REMOVE p.horario, p.vehiculo, p.sueldo, p.puesto, p.area RETURN p"%(persona)
+
+        query = "MATCH (p:Persona:Trabajador) WHERE p.nombre = '%s' REMOVE p:Trabajador RETURN p"%(persona)
+        result = session.run(query)
+
+        session.close()
+        return jsonify({"Message": "Trabajador eliminado exitosamente"}), 200
+
+    except Exception as e:
+        print("El error es este")
+        print(e)
+        return jsonify({"Message": "Error, no se pudo ejecutar"}), 500
 
 @app.route('/api/sucursal_pedidos', methods=['POST'])
 def create_sucursal_pedidos():
@@ -153,9 +324,15 @@ def create_sucursal_pedidos():
         else:
             tipo = 'Fisico'
 
-        fecha_orden = content['fecha_orden']
-        fecha_entrega = content['fecha_entrega']
-        # estado = content['estado']
+        # fecha_orden = content['fecha_orden']
+        # fecha_entrega = content['fecha_entrega']
+
+        tiempo = random.uniform(10, 72)
+        texto = str(tiempo) + ' hrs'
+
+        fecha_orden = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).date()
+        fecha_entrega = fecha_orden + datetime.timedelta(days=random.randint(3, 6))
+
         estado = 'En proceso'
 
         metodo_envio = content['metodo_envio']
@@ -204,12 +381,12 @@ def create_sucursal_pedidos():
 
         # crear el nuevo nodo de pedido
         #CUIDADO HAY QUE VER LA FECHA
-        query = "CREATE (p:Pedido{id: '%s', fecha_orden: '%s', fecha_entrega: '%s', estado: '%s', metodo_envio: '%s', cancelado: %s}) RETURN p"%(nuevo_id, fecha_orden, fecha_entrega, estado, metodo_envio, cancelado)
+        query = "CREATE (p:Pedido{id: '%s', fecha_orden: date('%s'), fecha_entrega: date('%s'), estado: '%s', metodo_envio: '%s', cancelado: %s}) RETURN p"%(nuevo_id, fecha_orden, fecha_entrega, estado, metodo_envio, cancelado)
         result = session.run(query)
 
         #crear el nuevo nodo de factura
         #CUIDADO HAY QUE VER LA FECHA
-        query = "CREATE (f:Factura{fecha: '%s', total: %f, metodo_pago: '%s', numero_de_transaccion: %s, iva: %f}) RETURN f"%(fecha_orden, total, metodo_pago, transaccion, iva)
+        query = "CREATE (f:Factura{fecha: date('%s'), total: %f, metodo_pago: '%s', numero_de_transaccion: %s, iva: %f, anulado: false}) RETURN f"%(fecha_orden, total, metodo_pago, transaccion, iva)
         result = session.run(query)
         
         # crear la relacion de pedido a sucursal
@@ -308,6 +485,64 @@ def get_precio(producto):
     
     except:
         return jsonify({"Error: No se pudo ejecutar"}), 500
+
+@app.route('/api/agregar_sucursal', methods=['POST'])
+def create_sucursal():
+    try:
+        content = request.json
+        session = connect_to_neo4j()
+
+        query = "CREATE (n:Sucursal{nombre: '%s', direccion: '%s', nit: '%s', categoria: '%s', telefono: %d}) RETURN n"%(content['nombre'], content['direccion'], content['nit'], content['categoria'] , int(content['telefono']))
+        result = session.run(query)
+        session.close()
+        return jsonify({"Message": "Sucursal creada exitosamente"}), 200
+    except Exception as e:
+        print(e)
+        return jsonify({"Message": "No se pudo ejecutar"}), 500
+
+
+@app.route('/api/eliminar_pedido', methods=['POST'])
+def delete_pedido():
+    try:
+        content = request.json
+        id_pedido = content['id_pedido']
+        session = connect_to_neo4j()
+
+        query = "MATCH (n:Pedido)-[r:ASOCIADO]->(s) WHERE n.id = '%s' RETURN s"%(id_pedido)
+        result = session.run(query)
+        print(result)
+        
+        num_transaccion = 0
+        for record in result:
+            num_transaccion = record['s']["numero_de_transaccion"]
+        
+        query = "MATCH (n:Factura) WHERE n.numero_de_transaccion = %d SET n.anulado = true RETURN n"%(num_transaccion)
+        result = session.run(query)
+        
+        query = "MATCH (n:Pedido) WHERE n.id = '%s' DETACH DELETE n"%(id_pedido)
+        result = session.run(query)
+        
+        session.close()
+        return jsonify({"Message": "Pedido eliminado exitosamente"}), 200
+    except Exception as e:
+        
+        print(e)
+        return jsonify({"Message": "No se pudo ejecutar"}), 500
+
+@app.route('/api/recogido', methods=['POST'])
+def recogido():
+    try:
+        content = request.json
+        id_pedido = content['id_pedido']
+        session = connect_to_neo4j()
+
+        query = "MATCH (n:Pedido)-[r:SE_HACE]->(s:Sucursal) WHERE n.id = '%s' REMOVE r.servicio_mensajeria RETURN n"%(id_pedido)
+        result = session.run(query)
+
+        session.close()
+        return jsonify({"Message": "Pedido actualizado exitosamente"}), 200
+    except:
+        return jsonify({"Message": "No se pudo ejecutar"}), 500
 
 @app.route('/api/prueba', methods=['GET'])
 def get_prueba():
