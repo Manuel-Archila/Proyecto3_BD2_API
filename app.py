@@ -45,7 +45,7 @@ def get_sucursal_productos():
     try:
         nombre = request.headers.get('nombre')
         session = connect_to_neo4j()
-        query = "MATCH (n:Sucursal)-[r:TIENE]->(p:Producto) WHERE n.nombre = '%s' RETURN n, r, p"%(nombre)
+        query = "MATCH (n:Sucursal)-[r:ALMACENA]->(p:Producto) WHERE n.nombre = '%s' RETURN n, r, p"%(nombre)
         result = session.run(query)
 
         nodes = []
@@ -492,8 +492,21 @@ def create_sucursal():
         content = request.json
         session = connect_to_neo4j()
 
+        productos = content['productos']
+
         query = "CREATE (n:Sucursal{nombre: '%s', direccion: '%s', nit: '%s', categoria: '%s', telefono: %d}) RETURN n"%(content['nombre'], content['direccion'], content['nit'], content['categoria'] , int(content['telefono']))
         result = session.run(query)
+
+        almacenado = 'Estanteria'
+
+        for i in range(len(content['productos'])):
+            cantidad = random.randint(10, 20)
+            palabras = ["alta", "media", "baja"]
+            demanda = random.choice(palabras)
+            # crear la relacion de sucursal a producto
+            query = "MATCH (n:Sucursal), (p:Producto) WHERE n.nombre = '%s' AND p.nombre = '%s' CREATE (n)-[r:ALMACENA{cantidad_inventario: %d, almacenado: '%s', demanda:'%s'}]->(p) RETURN n, r, p"%(content['nombre'], productos[i], cantidad, almacenado, demanda)
+            result = session.run(query)
+
         session.close()
         return jsonify({"Message": "Sucursal creada exitosamente"}), 200
     except Exception as e:
@@ -542,6 +555,41 @@ def recogido():
         session.close()
         return jsonify({"Message": "Pedido actualizado exitosamente"}), 200
     except:
+        return jsonify({"Message": "No se pudo ejecutar"}), 500
+
+@app.route('/api/productos', methods=['GET'])
+def get_productos():
+    try:
+        session = connect_to_neo4j()
+        
+        result = session.run("MATCH (n:Producto) RETURN n")
+
+        nodes = [dict(record['n']) for record in result]
+        
+        session.close()
+        return jsonify(nodes), 200
+    except:
+        return jsonify({"Error": "No se pudo ejecutar"}), 500
+
+@app.route('/api/calificar_productos', methods=['POST'])
+def calificar():
+    try:
+        content = request.json
+        persona = content['persona']
+        comentario = content['comentario']
+        calificacion = content['calificacion']
+        lugar = content['lugar']
+        producto = content['producto']
+        session = connect_to_neo4j()
+
+        query = "MATCH (n:Persona), (s:Producto) WHERE n.nombre = '%s' AND s.nombre = '%s' CREATE (n)-[r:CALIFICA{comentario: '%s', calificacion: %d, lugar_de_compra: '%s'}]->(s) RETURN n, r, s"%(persona["nombre"], producto, comentario, int(calificacion), lugar)
+        # query = "CREATE (n:Persona)-[r:CALIFICA{comentario = '%s', calificacion = %d, lugar_de_compra = '%s'}]->(s:Producto) WHERE n.nombre = '%s' AND s.nombre = '%s' RETURN n, r, s"%(persona, comentario, calificacion, lugar, producto)
+        result = session.run(query)
+
+        session.close()
+        return jsonify({"Message": "Calificacion realizada exitosamente"}), 200
+    except Exception as e:
+        print(e)
         return jsonify({"Message": "No se pudo ejecutar"}), 500
 
 @app.route('/api/prueba', methods=['GET'])
