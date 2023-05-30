@@ -493,10 +493,23 @@ def create_sucursal():
         session = connect_to_neo4j()
 
         productos = content['productos']
+        servicio = content['servicio']
+
+        query = "MERGE (s:Servicio {nombre: '%s'}) RETURN s"%(servicio)
+        result = session.run(query)
 
         query = "CREATE (n:Sucursal{nombre: '%s', direccion: '%s', nit: '%s', categoria: '%s', telefono: %d}) RETURN n"%(content['nombre'], content['direccion'], content['nit'], content['categoria'] , int(content['telefono']))
         result = session.run(query)
+        random_number = random.uniform(100, 500)
+        precio = "{:.2f}".format(random_number)
 
+        lista = ["Miguel", "Cesar", "Pedro", "Roberto", "Alfonso", "Esteban", "Mick"]
+        contact = random.choice(lista)
+
+        propina = random.randint(10, 50)
+        
+        query = "MATCH (n:Sucursal), (s:Servicio) WHERE n.nombre = '%s' AND s.nombre = '%s' CREATE (n)-[r:CONTRATA{precio_servicio: %f, contacto: '%s', porcentaje_propina: %d}]->(s) RETURN n, r, s"%(content["nombre"], content["servicio"], float(precio), contact, int(propina))
+        result = session.run(query)
         almacenado = 'Estanteria'
 
         for i in range(len(content['productos'])):
@@ -550,6 +563,9 @@ def recogido():
         session = connect_to_neo4j()
 
         query = "MATCH (n:Pedido)-[r:SE_HACE]->(s:Sucursal) WHERE n.id = '%s' REMOVE r.servicio_mensajeria RETURN n"%(id_pedido)
+        result = session.run(query)
+
+        query = "MATCH (n:Pedido)-[r:SE_HACE]->(s:Sucursal) WHERE n.id = '%s' SET n.cancelado = true RETURN n"%(id_pedido)
         result = session.run(query)
 
         session.close()
