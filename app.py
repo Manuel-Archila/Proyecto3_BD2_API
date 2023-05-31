@@ -481,8 +481,9 @@ def get_precio(producto):
         for record in result:
             precio = record['n.precio_unitario']
        
+        session.close()
         return precio
-    
+
     except:
         return jsonify({"Error: No se pudo ejecutar"}), 500
 
